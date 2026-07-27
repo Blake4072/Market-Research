@@ -439,6 +439,10 @@ Mechanical invariants:
 
 13. range_high_before_range_low is frozen at event initialization and is not mutated during the lifecycle.
 
+14. Process every raw tick for events and stops.
+
+15. Update the swing window only when price changes.
+
 #########################################################
 Failure cases
 #########################################################
