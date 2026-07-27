@@ -1,0 +1,8 @@
+*_event_ledger.csv
+*.parquet
+output/
+output_test/
+event_ledgers/
+.venv/
+__pycache__/
+*.pyc

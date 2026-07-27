@@ -1,0 +1,2 @@
+code,message,contract,row_index,timestamp_utc,price,context
+INVALID_RISK_UNIT,risk_unit == 0 or non-finite,NQZ09-CME,30826,2009-10-16 15:25:00+00:00,1728.5,{'stop_loss_price': 1728.5}

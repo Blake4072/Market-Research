@@ -1,0 +1,18 @@
+{
+  "contract": "NQU12-CME",
+  "seed": 20260722,
+  "per_group": 5,
+  "ledger_event_count": 16911,
+  "replay_event_count": 16911,
+  "events_sampled": 31,
+  "events_passed": 31,
+  "events_failed": 0,
+  "pass_rate": 1.0,
+  "failures_by_field": {},
+  "scan_error_count": 381,
+  "engine_errors_during_replay": 381,
+  "scan_audit_aligned": true,
+  "reliable_for_research": false,
+  "reliability_scope": "sampled deterministic lifecycle audit",
+  "detail_path": "D:\\Market Data\\Experiment1\\audit\\NQU12-CME_sample_audit.csv"
+}

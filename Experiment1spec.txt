@@ -1,0 +1,541 @@
+Experiment 1 Spec
+
+#########################################################
+Purpose:
+#########################################################
+
+If a fixed mechanical price-transition event occurs in NQ tick data, then measure how the following event-to-event path resolves relative to the first opposing transition event.
+
+If the distribution is repeatable and positive after audit, then the event is worth deeper state partitioning; if not, discard or redefine the event.
+
+
+Question answered:
+
+If this event occurs, then does the distribution of subsequent outcomes differ from what would be expected under no directional asymmetry?
+
+#########################################################
+Inputs:
+#########################################################
+
+validated_parquet/*.parquet
+
+Required columns:
+    • timestamp_utc
+    • price
+
+Input assumptions:
+    • timestamp_utc is UTC.
+    • Rows are processed in deterministic timestamp order.
+    • price is the observed trade price.
+    • No volume, bid, ask, or order book data is required.
+
+#########################################################
+Outputs:
+#########################################################
+
+For every detected event, write the event time, event direction, entry price, stop loss price, opposing event price, outcome, realized_R, time to resolution, and audit flags.
+
+Aggregate outputs must report one row per contract and rollover trading day inside that contract, including event count, closed count, stop-loss count, unresolved count, rates, average_R, total_R, and expectancy_R.
+
+#######################
+Event schema:
+#######################
+event_id
+contract
+event_timestamp_utc
+event_direction
+entry_price
+
+origin_range_high_price
+origin_range_low_price
+range_high_before_range_low
+highest_price_during_lifecycle
+lowest_price_during_lifecycle
+
+stop_loss_price
+risk_unit
+
+opposing_event_price
+termination_timestamp_utc
+
+outcome
+realized_R
+seconds_to_resolution
+ticks_to_resolution
+
+#######################
+Aggregate Summary Schema:
+#######################
+contract
+trading_day
+event_count
+
+closed_by_opposing_event_count
+stop_loss_count
+unresolved_count
+
+closed_by_opposing_event_rate
+stop_loss_rate
+unresolved_rate
+
+average_R
+total_R
+expectancy_R
+
+average_R(per utc day)
+total_R(per utc day)
+expectancy_R(per utc day)
+
+total_recurrence_per_contract_letter(contract_letter)
+total_recurrence_per_day(utc_day)
+total_recurrence_per_session(session)
+
+#########################################################
+Pipeline
+#########################################################
+
+1. Load validated parquet files only for contracts whose parsed contract year is <= 2022.
+
+2. Treat input row order as authoritative.
+
+3. Scan price ticks sequentially.
+
+4. Maintain deterministic persistent state.
+
+5. Detect transition events.
+
+6. Initialize an event object for each detected event.
+
+7. On each incoming tick, active events are evaluated only for STOP_LOSS before transition-event logic. Opposing-event closure occurs only after a valid opposite transition event is detected.
+
+8. Finalize completed event objects and write them to the event ledger.
+
+9. Aggregate finalized events by specified partitions.
+
+10. Write each contract raw event ledger for Experiment 2.
+
+11. Immediately audit the completed contract scan against its rollover-filtered tick segment.
+
+12. Print scan/audit alignment and sampled-audit research reliability in the CLI.
+
+13. Write one aggregate summary ledger grouped by contract and rollover trading day.
+
+Dependency Chain:
+ticks
+→ row-start persistent state
+→ stop-loss checks
+→ transition predicates read range_state
+→ opposing closures
+→ new event initialization
+→ transition-side armed flag disarm
+→ swing predicates read tick window
+→ swing_state updates
+→ range_state updates from qualifying swings
+→ range-side armed flag re-arm
+→ persist state for next row
+→ ledger
+→ aggregates
+
+############
+Per Row Order of Operations
+############
+Per-row execution order:
+
+1. Load current row context.
+
+2. Construct current row state vector:
+   tick_0 = current row
+   tick_-1 = prior row
+   tick_-2 = two rows back
+
+3. Update highest_price_during_lifecycle and lowest_price_during_lifecycle for every event active at row start using current_price.
+
+4. Reevaluate active events for STOP_LOSS using current_price.
+
+5. Detect transition events using the current range_state before any swing or range mutation on this row.
+
+6. If a valid transition event occurs, terminate every active opposite-direction event as CLOSED_BY_OPPOSING_EVENT unless already stopped on this row.
+
+7. Initialize a new event object for the valid transition event.
+
+8. Confirm swing using tick_0, tick_-1, tick_-2.
+
+9. Update range_state if a qualifying swing is confirmed.
+
+10. Persist mutated range_state and rolling tick window as persistent state for the next row ingestion
+
+#########################################################
+Module graph
+#########################################################
+
+Module graph:
+
+input_loader 
+→ tick_scanner 
+→ event_engine 
+→ swing_detector 
+→ range_state_machine 
+→ event_finalizer 
+→ summary_aggregator 
+→ artifact_writer 
+→ audit_logger
+
+#########################################################
+Persistent state
+#########################################################
+
+Rolling tick window:
+tick_0
+tick_-1
+tick_-2
+
+swing_state:
+    previous_swing_high_price
+    previous_swing_high_timestamp_utc
+    previous_swing_low_price
+    previous_swing_low_timestamp_utc
+
+range_state:
+    range_high_price
+    range_high_timestamp_utc
+    range_low_price
+    range_low_timestamp_utc
+    range_high_armed
+    range_low_armed
+
+Current row context:
+contract
+timestamp_utc
+price
+row_index
+
+#########################################################
+Transition Event Definitions
+#########################################################
+#######################
+Rolling tick window
+#######################
+At row start:
+tick_0 = current row price
+tick_-1 = prior row price
+tick_-2 = two rows back price
+
+#######################
+Swing low:
+#######################
+tick_0 > tick_-1 < tick_-2
+
+swing_low_price = tick_-1 price
+swing_low_timestamp_utc = tick_-1 timestamp_utc
+
+#######################
+Swing high:
+#######################
+tick_0 < tick_-1 > tick_-2
+
+swing_high_price = tick_-1 price
+swing_high_timestamp_utc = tick_-1 timestamp_utc
+
+
+#######################
+Range high update:
+#######################
+If previous_swing_high_price is NULL:
+    swing_state.previous_swing_high_price = swing_high_price
+    swing_state.previous_swing_high_timestamp_utc = swing_high_timestamp_utc
+
+else if swing_high_price > swing_state.previous_swing_high_price:
+    range_state.range_high_price = swing_high_price
+    range_state.range_high_timestamp_utc = swing_high_timestamp_utc
+    range_state.range_high_armed = TRUE
+    swing_state.previous_swing_high_price = swing_high_price
+    swing_state.previous_swing_high_timestamp_utc = swing_high_timestamp_utc
+
+else:
+    swing_state.previous_swing_high_price = swing_high_price
+    swing_state.previous_swing_high_timestamp_utc = swing_high_timestamp_utc
+
+#######################
+Range low update:
+#######################
+If previous_swing_low_price is NULL:
+    swing_state.previous_swing_low_price = swing_low_price
+    swing_state.previous_swing_low_timestamp_utc = swing_low_timestamp_utc
+
+else if swing_low_price < swing_state.previous_swing_low_price:
+    range_state.range_low_price = swing_low_price
+    range_state.range_low_timestamp_utc = swing_low_timestamp_utc
+    range_state.range_low_armed = TRUE
+    swing_state.previous_swing_low_price = swing_low_price
+    swing_state.previous_swing_low_timestamp_utc = swing_low_timestamp_utc
+
+else:
+    swing_state.previous_swing_low_price = swing_low_price
+    swing_state.previous_swing_low_timestamp_utc = swing_low_timestamp_utc
+
+
+#######################
+Bullish transition event:
+#######################
+current_price > range_state.range_high_price
+and range_state.range_high_armed == TRUE
+
+After event initialization:
+
+range_state.range_high_armed = FALSE
+
+#######################
+Bearish transition event:
+#######################
+current_price < range_state.range_low_price
+and range_state.range_low_armed == TRUE
+
+After event initialization:
+
+range_state.range_low_armed = FALSE
+
+#######################
+Risk unit:
+#######################
+risk_unit = abs(entry_price - stop_loss_price)
+
+For bullish events:
+stop_loss_price = range_state.range_low_price at event initialization
+
+For bearish events:
+stop_loss_price = range_state.range_high_price at event initialization
+
+#######################
+Outcome labels:
+#######################
+outcome = CLOSED_BY_OPPOSING_EVENT | STOP_LOSS | UNRESOLVED_AT_FILE_END
+
+No timeout is used.
+
+Opposing-event termination scope:
+
+A valid bearish transition event terminates every active bullish event.
+
+A valid bullish transition event terminates every active bearish event.
+
+#######################
+Termination priority:
+#######################
+1. STOP_LOSS
+
+2. CLOSED_BY_OPPOSING_EVENT
+
+3. UNRESOLVED_AT_FILE_END
+
+#######################
+Bullish event termination:
+#######################
+STOP_LOSS occurs when:
+
+current_price <= stop_loss_price
+
+CLOSED_BY_OPPOSING_EVENT occurs when:
+
+a bearish transition event occurs before STOP_LOSS
+
+realized_R:
+
+if outcome = STOP_LOSS:
+
+realized_R = -1
+
+if outcome = CLOSED_BY_OPPOSING_EVENT:
+
+realized_R = (opposing_event_price - entry_price) / risk_unit
+
+#######################
+Bearish event termination:
+#######################
+STOP_LOSS occurs when:
+
+current_price >= stop_loss_price
+
+CLOSED_BY_OPPOSING_EVENT occurs when:
+
+a bullish transition event occurs before STOP_LOSS
+
+realized_R:
+
+if outcome = STOP_LOSS:
+
+realized_R = -1
+
+if outcome = CLOSED_BY_OPPOSING_EVENT:
+
+realized_R = (entry_price - opposing_event_price) / risk_unit
+
+#######################
+File-end termination:
+#######################
+If no STOP_LOSS or opposing event occurs before file end:
+
+outcome = UNRESOLVED_AT_FILE_END
+
+opposing_event_price = NULL
+
+realized_R = NULL
+
+UNRESOLVED_AT_FILE_END events are excluded from average_R, total_R, and expectancy_R unless explicitly reported separately.
+
+#######################
+Event field definitions:
+#######################
+origin_range_high_price = range_state.range_high_price at event initialization.
+
+origin_range_low_price = range_state.range_low_price at event initialization.
+
+opposing_event_price = entry_price of the valid opposing transition event that caused termination. If outcome = STOP_LOSS, opposing_event_price = NULL.
+
+swing_state.previous_swing_high_timestamp_utc = tick_-1 timestamp_utc
+
+swing_state.previous_swing_low_timestamp_utc = tick_-1 timestamp_utc
+
+range_high_timestamp_utc = swing_high_timestamp_utc that created range_state.range_high_price.
+
+range_low_timestamp_utc = swing_low_timestamp_utc that created range_state.range_low_price.
+
+contract_letter = first occurrence of H, M, U, or Z after NQ in the contract identifier.
+
+range_high_before_range_low = TRUE if range_state.range_high_timestamp_utc < range_state.range_low_timestamp_utc at event initialization; otherwise FALSE. The value is frozen for the event object at initialization.
+
+highest_price_during_lifecycle = maximum observed trade price from the event initialization tick through the termination tick, inclusive. Initialize to entry_price and update for every subsequent tick while the event remains active.
+
+lowest_price_during_lifecycle = minimum observed trade price from the event initialization tick through the termination tick, inclusive. Initialize to entry_price and update for every subsequent tick while the event remains active.
+
+#########################################################
+Mechanical invariants
+#########################################################
+
+Mechanical invariants:
+
+1. Validated input files are assumed to be timestamp-ordered before experiment execution. The experiment does not re-sort or pre-scan full files for timestamp monotonicity.
+
+2. No TIMEOUT exists in Experiment 1. Events terminate only by STOP_LOSS, opposing transition event, or file end.
+
+3. No transition event may initialize until both range_high_price and range_low_price are non-null.
+
+4. If risk_unit == 0, no event is initialized and INVALID_RISK_UNIT is logged.
+
+5. If STOP_LOSS and opposing transition are both true on the same tick, outcome = STOP_LOSS.
+
+6. Each range_high can trigger at most one bullish transition event.
+
+7. Each range_low can trigger at most one bearish transition event.
+
+8. STOP_LOSS check runs before transition-event closure on every row.
+
+9. Same-direction events may accumulate until STOP_LOSS or opposing transition.
+
+10. Transition-event logic always executes before any mutation of range_state on the current row.
+
+11. When a swing is confirmed, its price and timestamp are always taken from tick_-1.
+
+12. Lifecycle extrema include the event initialization tick and the termination tick.
+
+13. range_high_before_range_low is frozen at event initialization and is not mutated during the lifecycle.
+
+#########################################################
+Failure cases
+#########################################################
+
+Failure cases:
+
+MISSING_REQUIRED_COLUMN:
+Required input column is missing.
+
+NULL_TIMESTAMP:
+timestamp_utc is NULL.
+
+NULL_PRICE:
+price is NULL.
+
+INVALID_PRICE:
+price cannot be parsed as a numeric value.
+
+EVENT_BEFORE_RANGE_READY:
+Transition event attempted before both range_high_price and range_low_price are non-null.
+
+INVALID_RISK_UNIT:
+risk_unit == 0 or risk_unit is NULL.
+
+INVALID_EVENT_DIRECTION:
+event_direction is not BULLISH or BEARISH.
+
+DOUBLE_TERMINATION:
+An event was finalized more than once.
+
+UNEXPECTED_ACTIVE_STATE:
+An event is active after being finalized, or finalized while still marked active.
+
+UNEXPECTED_EXCEPTION:
+Any unhandled exception with file, contract, row_index, timestamp_utc, and price context.
+
+#########################################################
+Performance complexity
+#########################################################
+
+Performance complexity:
+
+n = number of input rows
+a = number of active events
+e = number of finalized events
+
+Time complexity:
+O(n + lifecycle_update_work + termination_work)
+
+lifecycle_update_work = sum of active event counts across processed rows.
+
+Worst-case lifecycle_update_work:
+O(n * a)
+
+Worst-case termination_work:
+O(e)
+
+Space complexity:
+O(a + e)
+
+Persistent scanner state is O(1).
+
+Active event memory is O(a).
+
+Finalized event output memory is O(e), unless events are streamed directly to disk.
+
+#########################################################
+Files written
+#########################################################
+
+Output root:
+D:\Market Data\Experiment1
+
+event_ledgers/{contract}_event_ledger.csv
+
+aggregate_event_summary_by_contract_trading_day.csv
+
+errors/{contract}_errors.csv
+
+audit/{contract}_sample_audit.csv
+
+audit/{contract}_sample_audit_summary.json
+
+run_manifest.csv
+
+experiment_manifest.json
+
+Only contracts with parsed contract year <= 2022 are processed.
+
+The CLI may print RELIABLE FOR RESEARCH = YES only when the sampled deterministic lifecycle audit fully aligns, the replay has zero engine errors, and the initial scan has zero logged errors. This reliability statement applies to the sampled audit scope and is not a full-ledger proof.
+
+#########################################################
+Delta from previous experiment
+#########################################################
+
+Experiment 1 is the baseline deterministic event engine.
+
+No previous experiment is required for comparison.
+
+This experiment establishes the first authoritative event ledger, outcome accounting rules, and aggregate summary contract.

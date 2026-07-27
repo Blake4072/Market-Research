@@ -1,0 +1,18 @@
+{
+  "contract": "NQZ19-CME",
+  "seed": 20260722,
+  "per_group": 5,
+  "ledger_event_count": 280254,
+  "replay_event_count": 280254,
+  "events_sampled": 32,
+  "events_passed": 32,
+  "events_failed": 0,
+  "pass_rate": 1.0,
+  "failures_by_field": {},
+  "scan_error_count": 2783,
+  "engine_errors_during_replay": 2783,
+  "scan_audit_aligned": true,
+  "reliable_for_research": false,
+  "reliability_scope": "sampled deterministic lifecycle audit",
+  "detail_path": "D:\\Market Data\\Experiment1\\audit\\NQZ19-CME_sample_audit.csv"
+}

@@ -1,0 +1,2 @@
+code,message,contract,row_index,timestamp_utc,price,context
+INVALID_RISK_UNIT,risk_unit == 0 or non-finite,NQH10-CME,39592,2010-02-02 09:03:00+00:00,1752.75,{'stop_loss_price': 1752.75}

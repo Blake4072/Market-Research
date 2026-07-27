@@ -1,0 +1,4 @@
+code,message,contract,row_index,timestamp_utc,price,context
+INVALID_RISK_UNIT,risk_unit == 0 or non-finite,NQU10-CME,52800,2010-08-12 10:04:00+00:00,1831.25,{'stop_loss_price': 1831.25}
+INVALID_RISK_UNIT,risk_unit == 0 or non-finite,NQU10-CME,70894,2010-09-02 06:44:00+00:00,1815.75,{'stop_loss_price': 1815.75}
+INVALID_RISK_UNIT,risk_unit == 0 or non-finite,NQU10-CME,70895,2010-09-02 06:45:00+00:00,1815.75,{'stop_loss_price': 1815.75}
