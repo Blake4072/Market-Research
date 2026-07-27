@@ -252,14 +252,18 @@ class Experiment1Engine:
             if created:
                 state.range_state.range_low_armed = False
 
-        # 7-8. Swing confirmation and range update after transition logic.
-        if tick_minus_1 is not None and tick_minus_2 is not None:
-            self._confirm_and_apply_swing(tick_0, tick_minus_1, tick_minus_2)
+        # 7-8. Process every raw tick, but advance swing structure only on price change.
+        price_changed = tick_minus_1 is None or tick_0.price != tick_minus_1.price
 
-        # 9. Persist rolling tick window for next row.
-        state.tick_minus_2 = tick_minus_1
+        if price_changed:
+            if tick_minus_1 is not None and tick_minus_2 is not None:
+                self._confirm_and_apply_swing(tick_0, tick_minus_1, tick_minus_2)
+
+            state.tick_minus_2 = tick_minus_1
+
+        # Keep the latest raw tick at the current price.
         state.tick_minus_1 = tick_0
-
+        
     def finalize_file_end(self) -> None:
         """Terminate all remaining active events as UNRESOLVED_AT_FILE_END."""
         active_events = list(self.state.active_bullish_events) + list(self.state.active_bearish_events)
